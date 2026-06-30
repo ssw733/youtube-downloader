@@ -1,9 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VIDEO_MODE=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -v|--video) VIDEO_MODE=true; shift ;;
+    -h|--help)
+      echo "Usage: $0 [-v] <playlist-url> [output-directory]"
+      echo "  -v, --video    Download as video (skip audio conversion)"
+      echo "Example: $0 https://www.youtube.com/playlist?list=PL... music"
+      echo "Example: $0 -v https://www.youtube.com/playlist?list=PL... videos"
+      exit 0 ;;
+    *) break ;;
+  esac
+done
+
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <playlist-url> [output-directory]"
-  echo "Example: $0 https://www.youtube.com/playlist?list=PL... music"
+  echo "Usage: $0 [-v] <playlist-url> [output-directory]"
   exit 1
 fi
 
@@ -12,15 +26,17 @@ if ! command -v yt-dlp &>/dev/null; then
   pip3 install --break-system-packages --user yt-dlp
 fi
 
-if ! command -v ffmpeg &>/dev/null; then
-  echo "ffmpeg not found. Installing via imageio-ffmpeg..."
-  pip3 install --break-system-packages --user imageio-ffmpeg
+if [ "$VIDEO_MODE" = false ]; then
+  if ! command -v ffmpeg &>/dev/null; then
+    echo "ffmpeg not found. Installing via imageio-ffmpeg..."
+    pip3 install --break-system-packages --user imageio-ffmpeg
+  fi
 fi
 
 export PATH="$HOME/.local/bin:$PATH"
 
 PLAYLIST_URL="$1"
-OUTPUT_DIR="${2:-playlist_audio}"
+OUTPUT_DIR="${2:-downloads}"
 mkdir -p "$OUTPUT_DIR"
 
 FFMPEG_PATH=""
@@ -32,20 +48,40 @@ fi
 
 YT_DLP=$(command -v yt-dlp)
 
-"$YT_DLP" \
-  --ffmpeg-location "$FFMPEG_PATH" \
-  -f bestaudio \
-  --extract-audio \
-  --audio-format mp3 \
-  --audio-quality 0 \
-  -o "$OUTPUT_DIR/%(playlist_index)02d - %(title)s.%(ext)s" \
-  --ignore-errors \
-  --no-overwrites \
-  --continue \
-  --embed-thumbnail \
-  --add-metadata \
-  --yes-playlist \
-  --no-playlist-reverse \
-  "$PLAYLIST_URL"
+if [ "$VIDEO_MODE" = true ]; then
+  "$YT_DLP" \
+    $( [ -n "$FFMPEG_PATH" ] && echo "--ffmpeg-location $FFMPEG_PATH" ) \
+    -f "bestvideo+bestaudio/best" \
+    --merge-output-format mp4 \
+    -o "$OUTPUT_DIR/%(playlist_index)02d - %(title)s.%(ext)s" \
+    --ignore-errors \
+    --no-overwrites \
+    --continue \
+    --embed-thumbnail \
+    --add-metadata \
+    --yes-playlist \
+    --no-playlist-reverse \
+    "$PLAYLIST_URL"
+else
+  if [ -z "$FFMPEG_PATH" ]; then
+    echo "Error: ffmpeg not found. Cannot convert to audio."
+    exit 1
+  fi
+  "$YT_DLP" \
+    --ffmpeg-location "$FFMPEG_PATH" \
+    -f bestaudio \
+    --extract-audio \
+    --audio-format mp3 \
+    --audio-quality 0 \
+    -o "$OUTPUT_DIR/%(playlist_index)02d - %(title)s.%(ext)s" \
+    --ignore-errors \
+    --no-overwrites \
+    --continue \
+    --embed-thumbnail \
+    --add-metadata \
+    --yes-playlist \
+    --no-playlist-reverse \
+    "$PLAYLIST_URL"
+fi
 
 echo "Done! Files saved to: $OUTPUT_DIR"
